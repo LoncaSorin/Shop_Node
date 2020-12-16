@@ -7,8 +7,28 @@ export const router = new Router();
 router.get('/', async (ctx) => {
     const response = ctx.response;
     const userId = ctx.state.user._id;
-    response.body = await productStore.find({ userId });
-    response.status = 200; // ok
+
+    let ifModifiedSince = ctx.request.headers['if-modified-since'];
+
+    let resp = []
+    if (ifModifiedSince) {
+        ifModifiedSince = new Date(ifModifiedSince);
+    }
+    const products = await productStore.find({ userId });
+    products.forEach(product => {
+        const thisProductModif = new Date(product.lastModified)
+        if(!ifModifiedSince || thisProductModif.getTime() > ifModifiedSince.getTime()){
+            //console.log(product);
+            resp.push(product);
+        }
+    });
+    if(resp.length == 0){
+        response.status = 304; // Not modified
+    }
+    else {
+        response.body = resp;
+        response.status = 200; // ok
+    }
 });
 
 router.get('/:id', async (ctx) => {
@@ -35,6 +55,7 @@ const createProduct = async (ctx, product, response) => {
         response.status = 201; // created
         broadcast(userId, { type: 'created', payload: product });
     } catch (err) {
+        console.log(err);
         response.body = { message: err.message };
         response.status = 400; // bad request
     }
@@ -57,7 +78,18 @@ router.put('/:id', async (ctx) => {
     } else {
         const userId = ctx.state.user._id;
         product.userId = userId;
+        const productStored = await productStore.findOne({ _id: ctx.params.id });
+        console.log(product);
+        console.log(productStored);
+        if(((productStored.version === product.version) || (productStored.version > product.version)) && product.hasConflicts === false){
+            console.log('Conflict!');
+            productStored.hasConflicts = true;
+            response.body = productStored;
+            response.status = 412;
+            return;
+        }
         const updatedCount = await productStore.update({ _id: id }, product);
+        product.hasConflicts = false;
         if (updatedCount === 1) {
             response.body = product;
             response.status = 200; // ok
@@ -79,3 +111,41 @@ router.del('/:id', async (ctx) => {
         ctx.response.status = 204; // no content
     }
 });
+
+router.post('/sync', async (ctx) =>{
+    let ok = 0
+    const products = ctx.request.body;
+    const response = ctx.response;
+    let body = [];
+    const userId = products[0].userId
+    for(const prod of products){
+        const product = await productStore.findOne({ _id: prod._id});
+        if(product){
+            if (product.description !== prod.description || product.price !== prod.price || product.size !== product.size || product.availability !== prod.availability) {
+                const updatedCount = await productStore.update({_id: prod._id}, prod);
+                if (updatedCount !== 1) {
+                    ok = 1
+                    response.body = {message: 'Resource no longer exists'};
+                    response.status = 405;
+                }
+                else{
+                    console.log("Intra")
+                    body[body.length] = prod;
+                    body[body.length] = product;
+                    //console.log(body)
+                    broadcast(userId, {type: 'updated', payload: prod});
+                }
+            }
+        }
+        else{
+            await createProduct(ctx, product, response);
+        }
+    }
+
+    console.log(ok)
+    if( ok === 0){
+        console.log("Body",body)
+        response.body = body;
+        response.status = 200;
+    }
+})
