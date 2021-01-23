@@ -34,18 +34,3 @@ router.post('/login', async (ctx) => {
     response.status = 400; // bad request
   }
 });
-
-router.get('/photo/:nr', async (ctx) => {
-  const response = ctx.response;
-
-  let img = {
-    "message": [
-      "https://images.dog.ceo/breeds/spaniel-japanese/n02085782_313.jpg",
-      "https://images.dog.ceo/breeds/clumber/n02101556_3736.jpg",
-      "https://images.dog.ceo/breeds/borzoi/n02090622_6851.jpg"
-    ],
-    "status": "success"
-  }
-  response.body = img;
-  response.status = 200;
-});
